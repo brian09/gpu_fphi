@@ -1,0 +1,2 @@
+/usr/bin/ar cr libcudafphi.a  CMakeFiles/cudafphi.dir/./cudafphi_generated_call_cudafphi.cu.o CMakeFiles/cudafphi.dir/./cudafphi_generated_compute_pval.cu.o CMakeFiles/cudafphi.dir/./cudafphi_generated_compute_h2.cu.o CMakeFiles/cudafphi.dir/./cudafphi_generated_compute_F.cu.o CMakeFiles/cudafphi.dir/./cudafphi_generated_cudafphi.cu.o CMakeFiles/cudafphi.dir/./cudafphi_generated_cudafphi_device_functions.cu.o
+/usr/bin/ranlib libcudafphi.a
