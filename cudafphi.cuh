@@ -103,7 +103,7 @@ typedef struct{
 
 typedef struct{
 
-	const float * hat;
+	float * hat;
 	const unsigned int * pmatrix;
 	const float * evectors;
 	const float * Z;
@@ -112,6 +112,7 @@ typedef struct{
 
 	bool covariates;
 	bool get_pval;
+	bool get_connectivity;
 
 	int device_id;
 
@@ -127,10 +128,15 @@ typedef struct{
 
 	cuda_fphi_variables_per_device shared_device_vars;
 	int stream_number;
+
+	int cov_number;
 	size_t n_voxels;
 	size_t n_subjects;
 	size_t n_permutations;
+	size_t n_covariates;
 	float * h_y;
+
+	float * h_cov;
 
 }cuda_fphi_variables_per_stream;
 
@@ -152,6 +158,8 @@ int compute_pvals(const float * d_sy, const float *  d_res,  const float * d_hat
 
 void * run_cudafphi_pthread(void * cudafphi_args);
 size_t run_allocation_test(cuda_fphi_variables_per_stream cudafPHI_args);
+void * run_cudafphi_connect_pthread(void * cudafphi_args);
 
+void whitened_Y(float * d_sy, float * mean, const float * d_evectors, float * d_y, size_t n_subjects, size_t n_voxels,cublasHandle_t handle, cudaStream_t stream);
 
 #endif /* CUDAFPHI_H_ */

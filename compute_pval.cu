@@ -167,7 +167,7 @@ static __global__ void calculate_score(const float * d_Z, const float * syP, con
 	if ((rowIdx < n_subjects) && (pIdx < (n_permutations+1))) {
 		const float div_num = d_sigmaP[pIdx]  / float(n_subjects);
 		const float score_val = d_Z[n_subjects + rowIdx];
-		shared_score[tIdx] = (0.5f * score_val  * ( (syP[pIdx*n_subjects + rowIdx])/div_num));
+		shared_score[tIdx] = (0.5f * score_val  * ( (syP[pIdx*n_subjects + rowIdx])/div_num - 1.f));
 
 	}else{
 	    shared_score[tIdx] = 0.f;
@@ -236,7 +236,7 @@ static __global__ void sum_Ts(const float * d_Ts, const float * d_score, float *
 
   if (rowIdx < (n_permutations + 1)) {
       const float comp_val = d_Ts[0];
-      if((d_Ts[rowIdx] >= comp_val  && d_score[rowIdx] >= d_score[0])  || rowIdx == 0){
+      if((d_Ts[rowIdx] >= comp_val  && d_score[rowIdx] >= 0.f)  || rowIdx == 0){
     	  shared_pval[tIdx] = 1.f;
       }else{
     	  shared_pval[tIdx] = 0.f;

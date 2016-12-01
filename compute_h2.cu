@@ -55,11 +55,15 @@ static __global__ void calculate_weights(float * d_weights, const float * d_Z, f
   if(rowIdx < n_subjects){
       float theta_0 = d_theta[0];
       float theta_1 = d_theta[1];
-      if(theta_0 < 0.f)
+      if(theta_0 < 0.f){
     	  theta_0 = 0.f;
 
-      if(theta_1 < 0.f)
+      }
+
+      if(theta_1 < 0.f){
     	  theta_1 = 0.f;
+
+      }
 
       float weight = d_Z[rowIdx]*theta_0 + d_Z[rowIdx + n_subjects]*theta_1;
 
@@ -68,6 +72,7 @@ static __global__ void calculate_weights(float * d_weights, const float * d_Z, f
       }else{
     	  d_weights[rowIdx] = 1.f/(weight*weight);
       }
+
 
 
 
@@ -178,7 +183,7 @@ static __global__ void calculate_score(float * d_score, const float * d_Z, float
   if(rowIdx < n_subjects){
       float F = d_F[voxel*n_subjects + rowIdx];
       F = F*F;
-      shared_score[tIdx] = 0.5f*d_Z[rowIdx + n_subjects]*(F/(*d_Sigma_P/float(n_subjects)));
+      shared_score[tIdx] = 0.5f*d_Z[rowIdx + n_subjects]*(F/(*d_Sigma_P/float(n_subjects)) - 1.f);
   }else{
       shared_score[tIdx] = 0.f;
   }
@@ -225,16 +230,16 @@ static __global__ void calculate_h2(float * d_h2, float * d_indicator, float * d
 	  	  d_boolean_score[voxel] = false;
       }else{
 
-	  if(*d_score < 0){
-	     h2r = 0.f;
-	  }
-	  h2r = sigma_A/(sigma_E + sigma_A);
-	  if(h2r <= 0.f){
-	      h2r = 0.f;
-	      d_boolean_score[voxel] = false;
-	  }else{
-	      d_boolean_score[voxel] = true;
-	  }
+    	  if(*d_score < 0){
+    		  h2r = 0.f;
+    	  }
+    	  h2r = sigma_A/(sigma_E + sigma_A);
+    	  if(h2r <= 0.f || h2r != h2r){
+    		  h2r = 0.f;
+	      	  d_boolean_score[voxel] = false;
+    	  }else{
+    		  d_boolean_score[voxel] = true;
+    	  }
 	  	  d_h2[voxel] = h2r;
 
 	  	  d_Sigma_A[voxel] = sigma_A;
@@ -244,7 +249,7 @@ static __global__ void calculate_h2(float * d_h2, float * d_indicator, float * d
 }
 
 
-static size_t N_SUBJECTS;
+
 
 
 int compute_h2(float * d_F, float * d_h2,  float * d_indicator, bool * d_boolean_score,
@@ -288,7 +293,6 @@ int compute_h2(float * d_F, float * d_h2,  float * d_indicator, bool * d_boolean
 
 	    calculate_d_theta<<<gridSize, blockSize, sizeof(float)*blockSize_n_subjects*2, stream>>>(vars.d_theta, d_F, aux_vars.d_Z, aux_vars.d_ZTZI, voxel, n_subjects);
 	    gpuErrchk(cudaPeekAtLastError());
-
 
 	    calculate_weights<<<gridSize, blockSize, 0, stream>>>(vars.d_weights, aux_vars.d_Z, vars.d_theta, n_subjects);
 	    gpuErrchk(cudaPeekAtLastError());

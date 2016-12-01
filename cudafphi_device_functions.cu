@@ -109,3 +109,8 @@ extern "C" std::vector<int> select_devices(){
 
   return selected_devices;
 }
+
+extern "C" std::vector<int> select_all_devices(){
+	std::cout << "Using the following devices:\n";
+	return print_devices();
+}

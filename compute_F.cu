@@ -5,6 +5,17 @@
 
 static __global__ void calculate_means(const float * d_sy, float * mean, const size_t n_voxels, const size_t n_subjects){
 
+
+	/*cublasHandle_t handle;
+	cublasCreate_v2(&handle);
+
+	size_t vIdx = threadIdx.x;
+
+	cublasSetPointerMode_v2(handle, CUBLAS_POINTER_MODE_DEVICE);
+
+    cublasDasum_v2(handle, n_subjects, &d_sy[vIdx*n_subjects], 1, &mean[vIdx]);*/
+
+
 		unsigned int tIdx = threadIdx.x;
 
 		unsigned int rowIdx = blockIdx.x*blockDim.x + threadIdx.x;
@@ -16,7 +27,7 @@ static __global__ void calculate_means(const float * d_sy, float * mean, const s
 		if(rowIdx < n_subjects && vIdx < n_voxels)
 			shared_mean[tIdx] = d_sy[vIdx*n_subjects + rowIdx];
 		else
-			shared_mean[tIdx] = 0.f;
+			shared_mean[tIdx] = 0.0;
 
 
 
@@ -83,7 +94,8 @@ static __global__ void demean_columns(float * d_Y, const float * d_sy, float * m
 
 
   if(rowIdx < n_subjects && voxel < n_voxels){
-	  const float value  =  d_sy[voxel*n_subjects + rowIdx] - mean[voxel]/float(n_subjects);
+	  const float l_mean = mean[voxel]/float(n_subjects);
+	  const float value  =  d_sy[voxel*n_subjects + rowIdx] - l_mean;
       d_Y[rowIdx + voxel*n_subjects] = value;
   }
 }
@@ -174,9 +186,72 @@ static __global__ void calculate_inverse_normal(float * d_Y,  const float * d_si
 
 
   if(rowIdx < n_subjects && voxel < n_voxels){
-	  float value = d_Y[rowIdx + voxel*n_subjects]/sqrt(d_sigma[voxel]/(n_subjects - 1.f));
+	  float value = d_Y[rowIdx + voxel*n_subjects]/sqrt(d_sigma[voxel]);
       d_Y[rowIdx + voxel*n_subjects] = value;
   }
+}
+
+static __global__ void calculate_SY(float * d_SY, const float * d_Y, const float * d_evectors, const size_t n_voxels, const size_t n_subjects){
+
+  const size_t rowIdx = blockDim.x*blockIdx.x + threadIdx.x;
+  const size_t colIdx = blockDim.y*blockIdx.y + threadIdx.y;
+
+  const size_t tIdx_x = threadIdx.x;
+  const size_t tIdx_y = threadIdx.y;
+
+  float l_F = 0.f;
+
+
+  extern __shared__  float shared_data[];
+  //__shared__  float shared_hat[BLOCK_SIZE_HAT][BLOCK_SIZE_HAT];
+  bool should_return_1 = false;
+  bool should_return_2 = false;
+  for (size_t shared_kIdx = 0 ; shared_kIdx < gridDim.x; shared_kIdx++)
+  {
+      size_t kIdx_evec = shared_kIdx*blockDim.x + tIdx_y;
+      size_t kIdx_SY = shared_kIdx*blockDim.x + tIdx_x;
+      if(rowIdx >= n_subjects || kIdx_evec >= n_subjects){
+          //shared_hat[tIdx_x][tIdx_y] = 0.f;
+    	  shared_data[tIdx_x*blockDim.x + tIdx_y] = 0.f;
+    	  should_return_1 = true;
+      }else{
+          //shared_hat[tIdx_x][tIdx_y] = d_evectors[rowIdx*n_subjects + kIdx_evec];
+    	  shared_data[tIdx_x*blockDim.x + tIdx_y] =  d_evectors[rowIdx*n_subjects + kIdx_evec];
+      }
+
+      if(colIdx >= n_voxels || kIdx_SY >= n_subjects){
+    	  shared_data[blockDim.x*blockDim.x + tIdx_x*blockDim.x + tIdx_y] = 0.f;
+    	  should_return_2 = true;
+      }else{
+    	  shared_data[blockDim.x*blockDim.x + tIdx_x*blockDim.x + tIdx_y] = d_Y[kIdx_SY + colIdx*n_subjects];
+
+      }
+
+    ///  if(should_return_1 && should_return_2)
+   // 	  return;
+
+
+      __syncthreads();
+
+      if((rowIdx < n_subjects) && (colIdx < (n_voxels))){
+          for (int jIdx = 0; jIdx < blockDim.x; jIdx++){
+   //   	local_hat_Idx = rowIdx*n_subjects + shared_kIdx*BLOCK_SIZE_HAT + k;
+   //   	local_syP_Idx = colIdx*n_subjects + shared_kIdx*BLOCK_SIZE_HAT + k;
+      	//if((local_hat_Idx < n_subjects*n_subjects) && (local_syP_Idx < n_subjects*(n_permutations + 1))){
+      	l_F +=  shared_data[tIdx_x*blockDim.x + jIdx] * shared_data[blockDim.x*blockDim.x + jIdx*blockDim.x + tIdx_y];
+      	//}
+          }
+      }
+
+      __syncthreads();
+
+  }
+
+  if((rowIdx >= n_subjects) || (colIdx >= (n_voxels))){
+    return;
+  }
+
+  d_SY[colIdx*n_subjects + rowIdx] = l_F;
 }
 
 
@@ -221,23 +296,36 @@ int compute_F(const float * d_hat, float* d_sy, const float *d_evectors, float *
 
 	dim3 gridSize_set(ceil(float(n_subjects)/float(blockSize_n_subjects)), ceil(float(n_voxels)/float(1024.f/blockSize_n_subjects)), 1);
 
+	dim3 blockSize_mult(16,16,1);
+	dim3 gridSize_mult(ceil(float(n_subjects)/float(16.0)), ceil(float(n_voxels)/float(16.0)), 1);
     gpuErrchk(cudaMemsetAsync(vars.mean_or_sigma, 0, sizeof(float)*n_voxels, stream ));
 
-    calculate_means<<<gridSize_mean, blockSize_mean, sizeof(float)*blockSize_n_subjects, stream>>>(d_sy, vars.mean_or_sigma, n_voxels, n_subjects);
+
+
+
+
+    calculate_means<<<gridSize_mean, blockSize_mean, blockSize_n_subjects*sizeof(float), stream>>>(d_sy, vars.mean_or_sigma, n_voxels, n_subjects);
     gpuErrchk(cudaPeekAtLastError());
-	demean_columns<<<gridSize_set, blockSize_set, 0, stream>>>(vars.d_Y, d_sy, vars.mean_or_sigma, n_voxels, n_subjects);
+	demean_columns<<<gridSize_mean, blockSize_mean, 0, stream>>>(vars.d_Y, d_sy, vars.mean_or_sigma, n_voxels, n_subjects);
     gpuErrchk(cudaPeekAtLastError());
 
-	float alpha = 1.f;
-	float beta = 0.f;
-    gpuErrchk(cudaMemsetAsync(vars.mean_or_sigma, 0, sizeof(float)*n_voxels, stream ));
+	float alpha = 1.0;
+	float beta = 0.0;
+   gpuErrchk(cudaMemsetAsync(vars.mean_or_sigma, 0, sizeof(float)*n_voxels, stream ));
 
-	calculate_sigma<<<gridSize_mean, blockSize_mean, sizeof(float)*blockSize_n_subjects, stream>>>(vars.d_Y, vars.mean_or_sigma, n_voxels, n_subjects);
+	calculate_sigma<<<gridSize_mean, blockSize_mean, sizeof(float)*1024, stream>>>(vars.d_Y, vars.mean_or_sigma, n_voxels, n_subjects);
 	gpuErrchk(cudaPeekAtLastError());
-	calculate_inverse_normal<<<gridSize_set, blockSize_set, 0, stream>>>(vars.d_Y, vars.mean_or_sigma, n_voxels, n_subjects);
+	calculate_inverse_normal<<<gridSize_mean, blockSize_mean, 0, stream>>>(vars.d_Y, vars.mean_or_sigma, n_voxels, n_subjects);
 	gpuErrchk(cudaPeekAtLastError());
-	cublasErrchk(cublasSgemm_v2(handle, CUBLAS_OP_T, CUBLAS_OP_N, n_subjects,n_voxels, n_subjects, &alpha, d_evectors,
-			n_subjects, vars.d_Y, n_subjects, &beta, d_sy, n_subjects));
+
+//	gpuErrchk(cudaStreamSynchronize(stream));
+   cublasErrchk(cublasSgemm_v2(handle, CUBLAS_OP_T, CUBLAS_OP_N, n_subjects,n_voxels, n_subjects, &alpha, d_evectors, n_subjects, vars.d_Y, n_subjects, &beta, d_sy, n_subjects));
+
+//	gpuErrchk(cudaStreamSynchronize(stream));
+
+//	calculate_SY<<<gridSize_mult, blockSize_mult, sizeof(float)*16*16*2, stream>>>(d_sy,  vars.d_Y,  d_evectors, n_voxels, n_subjects);
+
+//	gpuErrchk(cudaStreamSynchronize(stream));
 
    if(covariates){
 
@@ -245,6 +333,7 @@ int compute_F(const float * d_hat, float* d_sy, const float *d_evectors, float *
 
    }else{
 	   gpuErrchk(cudaMemcpyAsync(d_F, d_sy, sizeof(float)*n_subjects*n_voxels, cudaMemcpyDeviceToDevice, stream));
+
    }
 
 
